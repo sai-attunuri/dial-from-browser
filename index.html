@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Twilio WebRTC Call</title>
+  <script src="https://sdk.twilio.com/js/client/v1.14/twilio.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f2f2f2;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    #phone-container {
+      background-color: #fff;
+      width: 300px;
+      border-radius: 20px;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+      padding: 20px;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+    }
+    #top-bar {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      color: #555;
+      margin-bottom: 10px;
+    }
+    .btn {
+      margin: 10px 5px;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      color: white;
+    }
+    .call-btn { background-color: #28a745; }
+    .end-btn { background-color: #dc3545; }
+    .mute-btn { background-color: #ffc107; color: #000; }
+    .dialpad-btn { background-color: #007bff; }
+    #dialpad {
+      display: none;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .digit {
+      padding: 15px;
+      background-color: #eee;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    #call-timer {
+      margin-top: 5px;
+      font-size: 14px;
+      color: #666;
+    }
+    #initiateCallSection {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #remoteAudio {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="initiateCallSection">
+    <button id="callUsButton" class="btn call-btn">Initiate Call</button>
+  </div>
+
+  <div id="phone-container">
+    <div id="top-bar">
+      <div>🔋 85%</div>
+      <div>📶</div>
+    </div>
+
+    <div id="call-timer">Call Duration: 00:00</div>
+
+    <div>
+      <button id="muteButton" class="btn mute-btn">Mute</button>
+      <button id="dialpadButton" class="btn dialpad-btn">Dialpad</button>
+      <button id="disconnectButton" class="btn end-btn">End Call</button>
+    </div>
+
+    <div id="dialpad" class="dialpad">
+      <div class="digit">1</div>
+      <div class="digit">2</div>
+      <div class="digit">3</div>
+      <div class="digit">4</div>
+      <div class="digit">5</div>
+      <div class="digit">6</div>
+      <div class="digit">7</div>
+      <div class="digit">8</div>
+      <div class="digit">9</div>
+      <div class="digit">*</div>
+      <div class="digit">0</div>
+      <div class="digit">#</div>
+    </div>
+  </div>
+
+  <audio id="remoteAudio" autoplay></audio>
+
+  <script>
+    let device;
+    let connection;
+    let isMuted = false;
+    let callStartTime;
+    let timerInterval;
+
+    async function fetchToken() {
+      try {
+        const response = await fetch('https://webrtc-functions2-1515.twil.io/generate-token');
+        const data = await response.json();
+        return data.token;
+      } catch (error) {
+        console.error('Error fetching token:', error);
+      }
+    }
+
+    async function setupTwilioDevice() {
+      const token = await fetchToken();
+      if (!token) return console.error('Failed to retrieve token');
+
+      device = new Twilio.Device(token, {
+        debug: true,
+        codecPreferences: ["opus", "pcmu"]
+      });
+
+      device.on('ready', () => console.log('Twilio Device Ready'));
+      device.on('error', (error) => console.error('Device Error:', error.message));
+
+      device.on('connect', (conn) => {
+        console.log('Call Connected');
+        connection = conn;
+        document.getElementById('initiateCallSection').style.display = 'none';
+        document.getElementById('phone-container').style.display = 'flex';
+        startTimer();
+      });
+
+      device.on('disconnect', () => {
+        console.log('Call Disconnected');
+        document.getElementById('phone-container').style.display = 'none';
+        document.getElementById('initiateCallSection').style.display = 'flex';
+        stopTimer();
+      });
+    }
+
+    document.getElementById('callUsButton').addEventListener('click', async () => {
+      if (!device) await setupTwilioDevice();
+      if (!device) return;
+
+      connection = device.connect({ To: 'support' });
+    });
+
+    document.getElementById('disconnectButton').addEventListener('click', () => {
+      if (connection) connection.disconnect();
+    });
+
+    document.getElementById('muteButton').addEventListener('click', () => {
+      if (!connection) return;
+      isMuted = !isMuted;
+      connection.mute(isMuted);
+      document.getElementById('muteButton').textContent = isMuted ? 'Unmute' : 'Mute';
+    });
+
+    document.getElementById('dialpadButton').addEventListener('click', () => {
+      const dialpad = document.getElementById('dialpad');
+      dialpad.style.display = dialpad.style.display === 'grid' ? 'none' : 'grid';
+    });
+
+    document.querySelectorAll('.digit').forEach(digit => {
+      digit.addEventListener('click', () => {
+        if (connection) connection.sendDigits(digit.textContent);
+      });
+    });
+
+    function startTimer() {
+      callStartTime = Date.now();
+      timerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
+        const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const seconds = String(elapsed % 60).padStart(2, '0');
+        document.getElementById('call-timer').textContent = `Call Duration: ${minutes}:${seconds}`;
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval);
+      document.getElementById('call-timer').textContent = 'Call Duration: 00:00';
+    }
+  </script>
+
+</body>
+</html>
